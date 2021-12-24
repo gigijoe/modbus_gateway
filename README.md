@@ -1,7 +1,7 @@
-## Modbus TCP / RTU / ASCII Gateway
+## ESP32 Modbus TCP / RTU / ASCII Gateway
 
 #### Hardware
-TTGO T8V1.7 16MB FLASH / 8MB PSRAM
+ESP32 TTGO T8V1.7 16MB FLASH / 8MB PSRAM
 
 ![Alt text](Hardware.jpg?raw=true "Hardware")
 
