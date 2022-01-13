@@ -609,8 +609,8 @@ static esp_netif_t *wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &on_wifi_ap, NULL, NULL));
 
 	esp_netif_ip_info_t ipInfo_ap;
-	IP4_ADDR(&ipInfo_ap.ip, 192,168,4,1);
-	IP4_ADDR(&ipInfo_ap.gw, 192,168,4,1);
+	IP4_ADDR(&ipInfo_ap.ip, 172,16,4,1);
+	IP4_ADDR(&ipInfo_ap.gw, 172,16,4,1);
 	IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
 
 	esp_netif_dhcps_stop(netif_ap); // stop before setting ip WifiAP
@@ -682,7 +682,11 @@ static esp_netif_t *wifi_start(void)
     esp_wifi_get_max_tx_power(&tx_power);
     ESP_LOGI(TAG, "maximum tx power is %.2f dBm", tx_power * 0.25); 
 
+#ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
+    return netif_ap;
+#else
     return netif_sta;
+#endif
 }
 
 static void wifi_stop(void)
@@ -933,7 +937,8 @@ static esp_netif_t *eth_start(void)
     /* w5500 ethernet driver is based on spi driver */
     eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(spi_handle);
     w5500_config.int_gpio_num = CONFIG_EXAMPLE_ETH_SPI_INT_GPIO;
-    //mac_config.rx_task_stack_size = 4096;
+    mac_config.rx_task_stack_size = 4096;
+    mac_config.rx_task_prio = 15;
     s_mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
     s_phy = esp_eth_phy_new_w5500(&phy_config);
 #endif

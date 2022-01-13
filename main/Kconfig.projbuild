@@ -395,6 +395,12 @@ menu "Modbus TCP Slave Configuration"
             This option allows to use mDNS service to resolve IP addresses of the Modbus slaves.
             If the option is disabled the ip addresses of slaves are defined in static table.
 
+    config MB_SLAVE_EXT_INPUT
+        bool "Support external digital input"
+        default n
+        help
+            This option enable support of external digital input
+
 endmenu
 
 menu "Modbus RTU / ASCII Master Configuration"

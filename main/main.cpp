@@ -1128,16 +1128,17 @@ void initialize_ext_gpio() {
 void extGpioTask(void *pvParameters) {
     static PCF8574 *pcf8574 = nullptr;
     pcf8574 = new PCF8574[2];
-
+#ifdef CONFIG_MB_SLAVE_EXT_INPUT
     pcf8574[0].begin(0x40);
     pcf8574[0].allPinsMode(INPUT_PULLUP);
     discrete_reg_params.byte0 = pcf8574[0].read();
-
+#endif
     pcf8574[1].begin(0x42);
     pcf8574[1].allPinsMode(OUTPUT_PULLUP);
     pcf8574[1].write(~(coil_reg_params.byte0)); /**/
 
     while(1) {
+#ifdef CONFIG_MB_SLAVE_EXT_INPUT
 #if 0
         //if(xSemaphoreTake(semReadExtGpio, 10 / portTICK_PERIOD_MS) == pdTRUE) {
 #else
@@ -1176,7 +1177,7 @@ void extGpioTask(void *pvParameters) {
                 printf("discrete_reg_params.byte0 = 0x%02x\n", discrete_reg_params.byte0);
             }
         }
-
+#endif
         if(xSemaphoreTake(semWriteExtGpio, 10 / portTICK_PERIOD_MS) == pdTRUE) {
             static uint8_t byte0 = 0;
             uint8_t x = byte0 ^ coil_reg_params.byte0;
@@ -1261,9 +1262,11 @@ extern "C" void app_main(void)
 
     xTaskCreatePinnedToCore(ledTask, "ledTask", 2048, NULL, 3, NULL, 0);
 
-    led_sos_beep(&s_buzzer);
-    led_slow_flash(&s_led27);
-
+    if(s_sys_cfg.enable_eth == false) {
+        led_sos_beep(&s_buzzer);
+        led_slow_flash(&s_led27);
+    }
+    
     //initialize_sdmmc();
     initialize_gpio_isr();
     xTaskCreatePinnedToCore(&adcTask, "adcTask", 3072, NULL, 4, NULL, 0);
@@ -1296,20 +1299,22 @@ extern "C" void app_main(void)
 
     while(1) {
 #if 1        
-        wifi_ap_record_t ap_info;
-        esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
-        if(err == ESP_OK) {
-            //ESP_LOGI(TAG, "rssi : %d", ap_info.rssi);
-            if(ap_info.rssi < -60)
-                led_slow_flash(&s_buzzer);
-            else if(ap_info.rssi < -70)
-                led_normal_flash(&s_buzzer);
-            else if(ap_info.rssi < -80)
-                led_fast_flash(&s_buzzer);
-            else
-                led_off(&s_buzzer);
-        } else
-            led_sos_beep(&s_buzzer);
+        if(s_sys_cfg.enable_eth == false) {
+            wifi_ap_record_t ap_info;
+            esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
+            if(err == ESP_OK) {
+                //ESP_LOGI(TAG, "rssi : %d", ap_info.rssi);
+                if(ap_info.rssi < -60)
+                    led_slow_flash(&s_buzzer);
+                else if(ap_info.rssi < -70)
+                    led_normal_flash(&s_buzzer);
+                else if(ap_info.rssi < -80)
+                    led_fast_flash(&s_buzzer);
+                else
+                    led_off(&s_buzzer);
+            } else
+                led_sos_beep(&s_buzzer);
+        }
 #endif
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
