@@ -49,6 +49,8 @@ void wifi_load_config();
 void wifi_save_config();
 void wifi_factory_reset();
 
+void wifi_scan_start(char *ssid, uint8_t *bssid, uint8_t channel);
+
 void wifi_set_ssid(char *ssid);
 const char *wifi_get_ssid();
 

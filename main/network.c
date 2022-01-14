@@ -501,6 +501,17 @@ void wifi_factory_reset()
 	nvs_close(my_nvs_handle);
 }
 
+void wifi_scan_start(char *ssid, uint8_t *bssid, uint8_t channel)
+{
+	wifi_scan_config_t scan_config = {};
+	scan_config.ssid = (uint8_t *)ssid;
+	scan_config.bssid = bssid;
+	scan_config.channel = channel;
+	scan_config.show_hidden = 1;
+
+	esp_wifi_scan_start(&scan_config, 0);
+}
+
 void wifi_set_ssid(char *ssid)
 {
 	if(ssid == 0 || strlen(ssid) == 0) {
