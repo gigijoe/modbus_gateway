@@ -81,6 +81,9 @@ static eth_status_t s_eth_status = ETH_DISCONNECTED;
 #endif
 
 static esp_netif_t *s_network_esp_netif = NULL;
+static esp_netif_t *s_netif_sta = NULL;
+static esp_netif_t *s_netif_ap = NULL;
+static esp_netif_t *s_netif_eth = NULL;
 
 #ifdef CONFIG_EXAMPLE_CONNECT_IPV6
 static esp_ip6_addr_t s_ipv6_addr;
@@ -313,6 +316,10 @@ static void on_wifi_connect(void *esp_netif, esp_event_base_t event_base,
 #define CMD_WIFI_STATIC_GATEWAY "static_gateway"
 #define CMD_WIFI_STATIC_NETMASK "ststic_netmask"
 
+#define CMD_AP_SSID  "ap_ssid"
+#define CMD_AP_PASS  "ap_pass"
+#define CMD_AP_CHANNEL  "ap_channel"
+
 static nvs_handle my_nvs_handle;
 
 #define WIFI_SSID_MAX_LEN 32
@@ -323,6 +330,10 @@ static uint8_t s_pass[WIFI_PASS_MAX_LEN];
 static esp_ip4_addr_t s_wifi_static_ip4_addr;
 static esp_ip4_addr_t s_wifi_static_gateway_ip4_addr;
 static esp_ip4_addr_t s_wifi_static_netmask_ip4_addr;
+
+static uint8_t s_ap_ssid[WIFI_SSID_MAX_LEN];
+static uint8_t s_ap_pass[WIFI_PASS_MAX_LEN];
+static uint8_t s_ap_channel = 0;
 
 void wifi_load_config()
 {
@@ -376,6 +387,26 @@ void wifi_load_config()
 		ESP_LOGI(TAG, "Netmask: %s", esp_ip4addr_ntoa(&s_wifi_static_netmask_ip4_addr, buf, 16));
 	}
 
+	l = WIFI_SSID_MAX_LEN;
+	err = nvs_get_str (my_nvs_handle, CMD_AP_SSID, (char*)s_ap_ssid, &l);
+	if(err != ESP_OK) {
+		ESP_LOGE(TAG, "No AP SSID cached ...");
+	} else
+		ESP_LOGI(TAG, "AP SSID: %s", s_ap_ssid);
+
+	l = WIFI_PASS_MAX_LEN;
+	err = nvs_get_str (my_nvs_handle, CMD_AP_PASS, (char*)s_ap_pass, &l);
+	if(err != ESP_OK) {
+		ESP_LOGE(TAG, "No AP Password cached ...");
+  	} else
+		ESP_LOGI(TAG, "AP Password: %s", s_ap_pass);
+
+	err = nvs_get_u8 (my_nvs_handle, CMD_AP_CHANNEL, &s_ap_channel);
+	if(err != ESP_OK) {
+		ESP_LOGE(TAG, "No AP Channel cached ...");
+  	} else
+		ESP_LOGI(TAG, "AP Channel: %d", s_ap_channel);
+
 	nvs_close(my_nvs_handle);
 }
 
@@ -390,14 +421,14 @@ void wifi_save_config()
 	if(strlen((char*)s_ssid) > 0) {
 		err = nvs_set_str(my_nvs_handle, CMD_SSID, (char*)s_ssid);
 		if(err != ESP_OK)
-			ESP_LOGE(TAG, "Fail save SSID !!!");
+			ESP_LOGE(TAG, "Fail Save SSID !!!");
 	} else
 		nvs_erase_key(my_nvs_handle, CMD_SSID);
 
 	if(strlen((char*)s_pass) > 0) {
 		err = nvs_set_str(my_nvs_handle, CMD_PASS, (char*)s_pass);
 		if(err != ESP_OK)
-			ESP_LOGE(TAG, "Fail save Password !!!");
+			ESP_LOGE(TAG, "Fail Save Password !!!");
 	} else
 		nvs_erase_key(my_nvs_handle, CMD_PASS);
 
@@ -422,6 +453,27 @@ void wifi_save_config()
 	} else
 		nvs_erase_key(my_nvs_handle, CMD_WIFI_STATIC_NETMASK);
 
+	if(strlen((char*)s_ap_ssid) > 0) {
+		err = nvs_set_str(my_nvs_handle, CMD_AP_SSID, (char*)s_ap_ssid);
+		if(err != ESP_OK)
+			ESP_LOGE(TAG, "Fail Save AP SSID !!!");
+	} else
+		nvs_erase_key(my_nvs_handle, CMD_AP_SSID);
+
+	if(strlen((char*)s_ap_pass) > 0) {
+		err = nvs_set_str(my_nvs_handle, CMD_AP_PASS, (char*)s_ap_pass);
+		if(err != ESP_OK)
+			ESP_LOGE(TAG, "Fail Save AP Password !!!");
+	} else
+		nvs_erase_key(my_nvs_handle, CMD_AP_PASS);
+
+	if(s_ap_channel > 0) {
+		err = nvs_set_u8(my_nvs_handle, CMD_AP_CHANNEL, s_ap_channel);
+		if(err != ESP_OK)
+			ESP_LOGE(TAG, "Fail Save AP Channel !!!");	
+	} else
+		nvs_erase_key(my_nvs_handle, CMD_AP_CHANNEL);
+
 	nvs_commit(my_nvs_handle);
 	nvs_close(my_nvs_handle);
 }
@@ -440,6 +492,10 @@ void wifi_factory_reset()
 	nvs_erase_key(my_nvs_handle, CMD_WIFI_STATIC_IP);
 	nvs_erase_key(my_nvs_handle, CMD_WIFI_STATIC_GATEWAY);
 	nvs_erase_key(my_nvs_handle, CMD_WIFI_STATIC_NETMASK);
+
+	nvs_erase_key(my_nvs_handle, CMD_AP_SSID);
+	nvs_erase_key(my_nvs_handle, CMD_AP_PASS);
+	nvs_erase_key(my_nvs_handle, CMD_AP_CHANNEL);
 
 	nvs_commit(my_nvs_handle);
 	nvs_close(my_nvs_handle);
@@ -476,7 +532,53 @@ const char *wifi_get_password()
 {
 	if(strlen((char*)s_pass) > 0)
 		return (const char *)s_pass;
+
 	return CONFIG_EXAMPLE_WIFI_PASSWORD;
+}
+
+void wifi_set_ap_ssid(char *ssid)
+{
+	if(ssid == 0 || strlen(ssid) == 0) {
+		memset(s_ap_ssid, 0, WIFI_SSID_MAX_LEN);
+		return;
+	}
+
+	snprintf((char *)s_ap_ssid, WIFI_SSID_MAX_LEN, "%s", ssid);
+}
+
+const char *wifi_get_ap_ssid()
+{
+	if(strlen((char*)s_ap_ssid) > 0)
+		return (const char *)s_ap_ssid;
+	return CONFIG_EXAMPLE_WIFI_AP_SSID;
+}
+
+void wifi_set_ap_password(char *pass)
+{
+	if(pass == 0 || strlen(pass) == 0) {
+		memset(s_ap_pass, 0, WIFI_PASS_MAX_LEN);
+		return;
+	}
+
+	snprintf((char *)s_ap_pass, WIFI_PASS_MAX_LEN, "%s", pass);
+}
+
+const char *wifi_get_ap_password()
+{
+	if(strlen((char*)s_ap_pass) > 0)
+		return (const char *)s_ap_pass;
+
+	return CONFIG_EXAMPLE_WIFI_AP_PASSWORD;
+}
+
+void wifi_set_ap_channel(uint8_t ch)
+{
+	s_ap_channel = ch;
+}
+
+uint8_t wifi_get_ap_channel()
+{
+	return s_ap_channel;
 }
 
 void wifi_set_static_ip(esp_ip4_addr_t *ip4)
@@ -527,23 +629,16 @@ wifi_status_t wifi_get_status()
 *
 */
 
-static esp_netif_t *wifi_start(void)
+static esp_netif_t *wifi_sta_config(wifi_config_t *wifi_config)
 {
-    char *desc;
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-/*
-	uint8_t mac[6];
-	esp_wifi_get_mac(WIFI_IF_STA, mac);
-	printf("Wifi Station MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-*/
     esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_STA();
     // Prefix the interface description with the module TAG
     // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
+    char *desc;
     asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
     esp_netif_config.if_desc = desc;
     esp_netif_config.route_prio = 128;
-    esp_netif_t *netif_sta = esp_netif_create_wifi(WIFI_IF_STA, &esp_netif_config);
+    s_netif_sta = esp_netif_create_wifi(WIFI_IF_STA, &esp_netif_config);
     free(desc);
     esp_wifi_set_default_wifi_sta_handlers();
 
@@ -556,22 +651,12 @@ static esp_netif_t *wifi_start(void)
 #endif
 
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = CONFIG_EXAMPLE_WIFI_SSID,
-            .password = CONFIG_EXAMPLE_WIFI_PASSWORD,
-            .scan_method = EXAMPLE_WIFI_SCAN_METHOD,
-            .sort_method = EXAMPLE_WIFI_CONNECT_AP_SORT_METHOD,
-            .threshold.rssi = CONFIG_EXAMPLE_WIFI_SCAN_RSSI_THRESHOLD,
-            .threshold.authmode = EXAMPLE_WIFI_SCAN_AUTH_MODE_THRESHOLD,
-        },
-    };
 
 	if(s_wifi_static_ip4_addr.addr != 0) {
 		esp_netif_ip_info_t ip_info;
 		esp_netif_dns_info_t dns_info; 
 		
-		esp_netif_dhcpc_stop(netif_sta);
+		esp_netif_dhcpc_stop(s_netif_sta);
 		memset(&ip_info, 0, sizeof(ip_info));
 		ip_info.ip = s_wifi_static_ip4_addr;
 		ip_info.gw = s_wifi_static_gateway_ip4_addr;
@@ -587,23 +672,41 @@ static esp_netif_t *wifi_start(void)
 		dns_setserver(1, (const ip_addr_t *)&dns_addr);
 		dns_info.ip.u_addr.ip4.addr = dns_addr.u_addr.ip4.addr;
 
-		esp_netif_set_ip_info(netif_sta, &ip_info);
+		esp_netif_set_ip_info(s_netif_sta, &ip_info);
 		ESP_LOGI(TAG, "IP : " IPSTR, IP2STR(&ip_info.ip));
 		ESP_LOGI(TAG, "GATEWAY : " IPSTR, IP2STR(&ip_info.gw));
-		esp_netif_set_dns_info(netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
+		esp_netif_set_dns_info(s_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
 
 		const ip_addr_t *dns_ip = dns_getserver(IPADDR_TYPE_V4);
 		ESP_LOGI(TAG, "DNS : " IPSTR, IP2STR(&dns_ip->u_addr.ip4));
 	}
 
 	if(s_ssid[0] != '\0')
-		memcpy(wifi_config.sta.ssid, s_ssid, WIFI_SSID_MAX_LEN);
+		memcpy(wifi_config->sta.ssid, s_ssid, WIFI_SSID_MAX_LEN);
 	if(s_pass[0] != '\0')
-		memcpy(wifi_config.sta.password, s_pass, WIFI_PASS_MAX_LEN);
+		memcpy(wifi_config->sta.password, s_pass, WIFI_PASS_MAX_LEN);
+
+    ESP_LOGI(TAG, "Connecting to %s...", wifi_config->sta.ssid);
+
+	return s_netif_sta;
+}
 
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
 
-	esp_netif_t *netif_ap = esp_netif_create_default_wifi_ap();
+static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
+{
+    esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_AP();
+    // Prefix the interface description with the module TAG
+    // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
+    char *desc;
+    asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
+    esp_netif_config.if_desc = desc;
+    //esp_netif_config.route_prio = 128;
+    s_netif_ap = esp_netif_create_wifi(WIFI_IF_AP, &esp_netif_config);
+    free(desc);
+    esp_wifi_set_default_wifi_ap_handlers();
+
+	//s_netif_ap = esp_netif_create_default_wifi_ap();
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, &on_wifi_ap, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &on_wifi_ap, NULL, NULL));
@@ -613,28 +716,23 @@ static esp_netif_t *wifi_start(void)
 	IP4_ADDR(&ipInfo_ap.gw, 172,16,4,1);
 	IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
 
-	esp_netif_dhcps_stop(netif_ap); // stop before setting ip WifiAP
-	esp_netif_set_ip_info(netif_ap, &ipInfo_ap);
-	esp_netif_dhcps_start(netif_ap);
+	esp_netif_dhcps_stop(s_netif_ap); // stop before setting ip WifiAP
+	esp_netif_set_ip_info(s_netif_ap, &ipInfo_ap);
+	esp_netif_dhcps_start(s_netif_ap);
 
-	wifi_config_t ap_config = {
-        .ap = {
-        	.ssid = CONFIG_EXAMPLE_WIFI_AP_SSID,
-        	.ssid_len = strlen(CONFIG_EXAMPLE_WIFI_AP_SSID),
-        	.password = CONFIG_EXAMPLE_WIFI_AP_PASSWORD,
-            .channel = 0,
-            .authmode = WIFI_AUTH_WPA2_PSK,
-            .ssid_hidden = 0,
-            .max_connection = 8,
-            .beacon_interval = 100,
-        }
-    };
     if (strlen(CONFIG_EXAMPLE_WIFI_AP_PASSWORD) < 8) {
-        ap_config.ap.authmode = WIFI_AUTH_OPEN;
+        ap_config->ap.authmode = WIFI_AUTH_OPEN;
     }
 
+	if(s_ap_ssid[0] != '\0')
+		memcpy(ap_config->ap.ssid, s_ap_ssid, WIFI_SSID_MAX_LEN);
+	if(s_ap_pass[0] != '\0')
+		memcpy(ap_config->ap.password, s_ap_pass, WIFI_PASS_MAX_LEN);
+	if(s_ap_channel != 0)
+		ap_config->ap.channel = s_ap_channel;
+
     ESP_LOGI(TAG, "wifi_init_softap SSID:%s password:%s channel:%d",
-             CONFIG_EXAMPLE_WIFI_AP_SSID, CONFIG_EXAMPLE_WIFI_AP_PASSWORD, 0);
+             ap_config->ap.ssid, ap_config->ap.password, ap_config->ap.channel);
 
     // Enable DNS (offer) for dhcp server
     dhcps_offer_t dhcps_dns_value = OFFER_DNS;
@@ -647,19 +745,54 @@ static esp_netif_t *wifi_start(void)
     dnsserver.u_addr.ip4.addr = htonl(MY_DNS_IP_ADDR);
     dnsserver.type = IPADDR_TYPE_V4;
     dhcps_dns_setserver(&dnsserver);
-#endif
 
-    ESP_LOGI(TAG, "Connecting to %s...", wifi_config.sta.ssid);
-    //ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    return s_netif_ap;
+}
+
+#endif // CONFIG_EXAMPLE_ENABLE_WIFI_AP
+
+static esp_netif_t *wifi_start(void)
+{
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+/*
+	uint8_t mac[6];
+	esp_wifi_get_mac(WIFI_IF_STA, mac);
+	printf("Wifi Station MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+*/
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = CONFIG_EXAMPLE_WIFI_SSID,
+            .password = CONFIG_EXAMPLE_WIFI_PASSWORD,
+            .scan_method = EXAMPLE_WIFI_SCAN_METHOD,
+            .sort_method = EXAMPLE_WIFI_CONNECT_AP_SORT_METHOD,
+            .threshold.rssi = CONFIG_EXAMPLE_WIFI_SCAN_RSSI_THRESHOLD,
+            .threshold.authmode = EXAMPLE_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+        },
+    };
+
+	wifi_sta_config(&wifi_config);
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
+	wifi_config_t ap_config = {
+        .ap = {
+        	.ssid = CONFIG_EXAMPLE_WIFI_AP_SSID,
+        	.ssid_len = strlen(CONFIG_EXAMPLE_WIFI_AP_SSID),
+        	.password = CONFIG_EXAMPLE_WIFI_AP_PASSWORD,
+            .channel = CONFIG_EXAMPLE_WIFI_AP_CHANNEL,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .ssid_hidden = 0,
+            .max_connection = 8,
+            .beacon_interval = 100,
+        }
+    };
+    wifi_ap_config(&ap_config);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));        
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
 #else
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 #endif
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     /*
@@ -683,9 +816,9 @@ static esp_netif_t *wifi_start(void)
     ESP_LOGI(TAG, "maximum tx power is %.2f dBm", tx_power * 0.25); 
 
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
-    return netif_ap;
+    return s_netif_ap;
 #else
-    return netif_sta;
+    return s_netif_sta;
 #endif
 }
 
@@ -710,9 +843,16 @@ static void wifi_stop(void)
     ESP_ERROR_CHECK(esp_wifi_deinit());
     ESP_ERROR_CHECK(esp_wifi_clear_default_wifi_driver_and_handlers(wifi_netif));
     esp_netif_destroy(wifi_netif);
+
+    s_netif_sta = NULL;
     s_network_esp_netif = NULL;
 }
+
 #endif // CONFIG_EXAMPLE_CONNECT_WIFI
+
+/*
+*
+*/
 
 #define CMD_ETH_STATIC_IP "eth_static_ip"
 #define CMD_ETH_GATEWAY "eth_gateway"
@@ -877,8 +1017,8 @@ static esp_netif_t *eth_start(void)
         .base = &esp_netif_config,
         .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH
     };
-    esp_netif_t *netif_eth = esp_netif_new(&netif_config);
-    assert(netif_eth);
+    s_netif_eth = esp_netif_new(&netif_config);
+    assert(s_netif_eth);
     free(desc);
 
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
@@ -967,7 +1107,7 @@ static esp_netif_t *eth_start(void)
 #endif
     // combine driver with netif
     s_eth_glue = esp_eth_new_netif_glue(s_eth_handle);
-    esp_netif_attach(netif_eth, s_eth_glue);
+    esp_netif_attach(s_netif_eth, s_eth_glue);
 
     // Register user defined event handers
     ESP_ERROR_CHECK(esp_event_handler_instance_register(ETH_EVENT, ESP_EVENT_ANY_ID, &on_eth_event, NULL, NULL));
@@ -980,7 +1120,7 @@ static esp_netif_t *eth_start(void)
 		esp_netif_ip_info_t ip_info;
 		esp_netif_dns_info_t dns_info; 
 		
-		esp_netif_dhcpc_stop(netif_eth);
+		esp_netif_dhcpc_stop(s_netif_eth);
 		memset(&ip_info, 0, sizeof(ip_info));
 		ip_info.ip = s_eth_static_ip4_addr;
 		ip_info.gw = s_eth_gateway_ip4_addr;
@@ -993,17 +1133,17 @@ static esp_netif_t *eth_start(void)
 		dns_setserver(1, (const ip_addr_t *)&dns_addr);
 		dns_info.ip.u_addr.ip4.addr = dns_addr.u_addr.ip4.addr;
 
-		esp_netif_set_ip_info(netif_eth, &ip_info);
+		esp_netif_set_ip_info(s_netif_eth, &ip_info);
 		ESP_LOGI(TAG, "IP : " IPSTR, IP2STR(&ip_info.ip));
 		ESP_LOGI(TAG, "GATEWAY : " IPSTR, IP2STR(&ip_info.gw));
-		esp_netif_set_dns_info(netif_eth, ESP_NETIF_DNS_MAIN, &dns_info);
+		esp_netif_set_dns_info(s_netif_eth, ESP_NETIF_DNS_MAIN, &dns_info);
 
 		const ip_addr_t *dns_ip = dns_getserver(IPADDR_TYPE_V4);
 		ESP_LOGI(TAG, "DNS : " IPSTR, IP2STR(&dns_ip->u_addr.ip4));
 	}
 
     esp_eth_start(s_eth_handle);
-    return netif_eth;
+    return s_netif_eth;
 }
 
 static void eth_stop(void)
@@ -1021,6 +1161,7 @@ static void eth_stop(void)
     ESP_ERROR_CHECK(s_mac->del(s_mac));
 
     esp_netif_destroy(eth_netif);
+    s_netif_eth = NULL;
     s_network_esp_netif = NULL;
 }
 

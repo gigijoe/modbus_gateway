@@ -315,7 +315,7 @@ static int wifi(int argc, char** argv)
         uint8_t mac[6];
         //esp_wifi_get_mac(WIFI_IF_STA, mac);
         ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
-        printf("Wifi Station MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        printf("Wifi STA MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         printf("Status : ");
         switch(wifi_get_status()) {
             case WIFI_DISCONNECTED: printf("Disconnected ...\n");
@@ -325,10 +325,11 @@ static int wifi(int argc, char** argv)
             case WIFI_CONNECTED: printf("Connected ...\n");
                 ip4_addr = wifi_get_static_ip();
                 if(ip4_addr.addr == 0) { /* 0.0.0.0 */
-                    ip4_addr = network_get_ip();
-                    printf("DHCP IP : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
-                    ip4_addr = network_get_gateway();
-                    printf("Gateway : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
+                    esp_netif_t *netif = get_network_netif_from_desc("sta");
+                    esp_netif_ip_info_t ip_info;
+                    esp_netif_get_ip_info(netif, &ip_info);
+                    printf("DHCP IP : " IPSTR "\n", IP2STR(&ip_info.ip));
+                    printf("Gateway : " IPSTR "\n", IP2STR(&ip_info.gw));
                 } else {
                     printf("Static IP : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
                     ip4_addr = wifi_get_static_gateway();
@@ -340,6 +341,18 @@ static int wifi(int argc, char** argv)
             case WIFI_INTERNAL_ERROR: printf("Internal error ...\n");
                  break;
         }
+#ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
+        printf("Wifi AP SSID : %s\n", wifi_get_ap_ssid());
+        printf("Wifi AP Password : %s\n", wifi_get_ap_password());
+        printf("Wifi AP Channel : %u\n", wifi_get_ap_channel());
+        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
+        printf("Wifi AP MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+        esp_netif_t *netif = get_network_netif_from_desc("ap");
+        esp_netif_ip_info_t ip_info;
+        esp_netif_get_ip_info(netif, &ip_info);
+        printf("IP : " IPSTR "\n", IP2STR(&ip_info.ip));
+#endif
         return 0;
     }
 
@@ -353,6 +366,25 @@ static int wifi(int argc, char** argv)
             wifi_set_password(argv[2]);
         else
             printf("Wifi Password : %s\n", wifi_get_password());
+    } else if(strcasecmp(argv[1], "ap_ssid") == 0) {
+        if(argc >= 3)
+            wifi_set_ap_ssid(argv[2]);
+        else
+            printf("Wifi AP SSID : %s\n", wifi_get_ap_ssid());
+    } else if(strcasecmp(argv[1], "ap_password") == 0) {
+        if(argc >= 3)
+            wifi_set_ap_password(argv[2]);
+        else
+            printf("Wifi AP Password : %s\n", wifi_get_ap_password());
+    } else if(strcasecmp(argv[1], "ap_channel") == 0) {
+        if(argc >= 3) {
+            int v = atoi(argv[2]);
+            if(v >= 0 && v <= 13)
+                wifi_set_ap_channel((uint8_t)(v & 0xff));
+            else
+                printf("Wifi AP Channel range from 0 to 13\n");
+        } else
+            printf("Wifi AP Channel : %u\n", wifi_get_ap_channel());
     } else if(strcasecmp(argv[1], "connect") == 0) {
         network_connect();
     } else if(strcasecmp(argv[1], "disconnect") == 0) {
@@ -433,10 +465,11 @@ static int eth(int argc, char** argv)
             case WIFI_CONNECTED: printf("Connected ...\n");
                 ip4_addr = eth_get_static_ip();
                 if(ip4_addr.addr == 0) { /* 0.0.0.0 */
-                    ip4_addr = network_get_ip();
-                    printf("DHCP IP : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
-                    ip4_addr = network_get_gateway();
-                    printf("Gateway : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
+                    esp_netif_t *netif = get_network_netif_from_desc("eth");
+                    esp_netif_ip_info_t ip_info;
+                    esp_netif_get_ip_info(netif, &ip_info);
+                    printf("DHCP IP : " IPSTR "\n", IP2STR(&ip_info.ip));
+                    printf("Gateway : " IPSTR "\n", IP2STR(&ip_info.gw));
                 } else {
                     printf("Static IP : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
                     ip4_addr = eth_get_static_gateway();

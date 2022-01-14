@@ -55,6 +55,15 @@ const char *wifi_get_ssid();
 void wifi_set_password(char *pass);
 const char *wifi_get_password();
 
+void wifi_set_ap_ssid(char *ssid);
+const char *wifi_get_ap_ssid();
+
+void wifi_set_ap_password(char *pass);
+const char *wifi_get_ap_password();
+
+void wifi_set_ap_channel(uint8_t ch);
+uint8_t wifi_get_ap_channel();
+
 void wifi_set_static_ip(esp_ip4_addr_t *ip4);
 esp_ip4_addr_t wifi_get_static_ip();
 
