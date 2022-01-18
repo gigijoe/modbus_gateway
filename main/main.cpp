@@ -341,9 +341,9 @@ static int wifi(int argc, char** argv)
         uint8_t *b = wifi_get_bssid();
         printf("Wifi BSSID :  %02x:%02x:%02x:%02x:%02x:%02x\n", b[0], b[1], b[2], b[3], b[4], b[5]);
         printf("Wifi Channel : %u\n", wifi_get_channel());
-        uint8_t mac[6];
-        //ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
-        ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, mac));
+        uint8_t mac[6] = {0};
+        //esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        esp_wifi_get_mac(WIFI_IF_STA, mac);
         printf("Wifi STA MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         printf("Status : ");
         switch(wifi_get_status()) {
@@ -381,7 +381,7 @@ static int wifi(int argc, char** argv)
         printf("Wifi AP MAC :  %02x:%02x:%02x:%02x:%02x:%02x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
 
         esp_netif_t *netif = get_network_netif_from_desc("ap");
-        esp_netif_ip_info_t ip_info;
+        esp_netif_ip_info_t ip_info = {0};
         esp_netif_get_ip_info(netif, &ip_info);
         printf("IP : " IPSTR "\n", IP2STR(&ip_info.ip));
 #endif

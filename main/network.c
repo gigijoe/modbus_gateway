@@ -634,7 +634,7 @@ uint8_t *wifi_get_ap_mac()
 {
 	static uint8_t mac[6] = {0}; 
 	if(s_ap_mac[0] == 0 && s_ap_mac[1] == 0 && s_ap_mac[2] == 0 && s_ap_mac[3] == 0 && s_ap_mac[4] == 0 && s_ap_mac[5] == 0) {
-		ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_AP, mac));
+		esp_wifi_get_mac(WIFI_IF_AP, mac);
 		return &mac[0];
 	} else
 		return &s_ap_mac[0];
