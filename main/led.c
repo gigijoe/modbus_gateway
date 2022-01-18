@@ -1,4 +1,5 @@
 #include "led.h"
+#include "esp32/rom/gpio.h"
 
 led s_buzzer = {0};
 led s_led25 = {0};

@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp32/rom/gpio.h"
 #include "esp32/rom/ets_sys.h"
 #include "ds18b20.h"
 

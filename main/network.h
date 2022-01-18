@@ -51,16 +51,25 @@ void wifi_factory_reset();
 
 void wifi_scan_start(char *ssid, uint8_t *bssid, uint8_t channel);
 
-void wifi_set_ssid(char *ssid);
+void wifi_set_ssid(const char *ssid);
 const char *wifi_get_ssid();
 
-void wifi_set_password(char *pass);
+void wifi_set_password(const char *pass);
 const char *wifi_get_password();
 
-void wifi_set_ap_ssid(char *ssid);
+void wifi_set_bssid(uint8_t *bssid);
+uint8_t *wifi_get_bssid();
+
+void wifi_set_channel(uint8_t ch);
+uint8_t wifi_get_channel();
+
+void wifi_set_ap_mac(uint8_t *mac);
+uint8_t *wifi_get_ap_mac();
+
+void wifi_set_ap_ssid(const char *ssid);
 const char *wifi_get_ap_ssid();
 
-void wifi_set_ap_password(char *pass);
+void wifi_set_ap_password(const char *pass);
 const char *wifi_get_ap_password();
 
 void wifi_set_ap_channel(uint8_t ch);

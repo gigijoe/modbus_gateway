@@ -20,6 +20,7 @@
 #include "esp_netif.h"
 
 #include "driver/gpio.h"
+#include "esp32/rom/gpio.h"
 #include "driver/i2c.h"
 #include "soc/rtc_io_reg.h"
 
@@ -304,6 +305,31 @@ static void register_restart()
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 }
 
+static uint8_t atohex(char *s)
+{
+  uint8_t value = 0;
+  if(!s)
+    return 0;
+
+  if(*s >= '0' && *s <= '9')
+    value = (*s - '0') << 4;
+  else if(*s >= 'A' && *s <= 'F')
+    value = ((*s - 'A') + 10) << 4;
+  else if(*s >= 'a' && *s <= 'f')
+    value = ((*s - 'a') + 10) << 4;
+
+  s++;
+
+  if(*s >= '0' && *s <= '9')
+    value |= (*s - '0');
+  else if(*s >= 'A' && *s <= 'F')
+    value |= ((*s - 'A') + 10);
+  else if(*s >= 'a' && *s <= 'f')
+    value |= ((*s - 'a') + 10);
+
+  return value;
+}
+
 static int wifi(int argc, char** argv)
 {
     esp_ip4_addr_t ip4_addr;
@@ -312,9 +338,12 @@ static int wifi(int argc, char** argv)
     if(argc <= 1) {
         printf("Wifi SSID : %s\n", wifi_get_ssid());
         printf("Wifi Password : %s\n", wifi_get_password());
+        uint8_t *b = wifi_get_bssid();
+        printf("Wifi BSSID :  %02x:%02x:%02x:%02x:%02x:%02x\n", b[0], b[1], b[2], b[3], b[4], b[5]);
+        printf("Wifi Channel : %u\n", wifi_get_channel());
         uint8_t mac[6];
-        //esp_wifi_get_mac(WIFI_IF_STA, mac);
-        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+        //ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+        ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, mac));
         printf("Wifi STA MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         printf("Status : ");
         switch(wifi_get_status()) {
@@ -345,8 +374,11 @@ static int wifi(int argc, char** argv)
         printf("Wifi AP SSID : %s\n", wifi_get_ap_ssid());
         printf("Wifi AP Password : %s\n", wifi_get_ap_password());
         printf("Wifi AP Channel : %u\n", wifi_get_ap_channel());
-        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
-        printf("Wifi AP MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        //ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
+        //ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_AP, mac));
+        //printf("Wifi AP MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        uint8_t *m = wifi_get_ap_mac();
+        printf("Wifi AP MAC :  %02x:%02x:%02x:%02x:%02x:%02x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
 
         esp_netif_t *netif = get_network_netif_from_desc("ap");
         esp_netif_ip_info_t ip_info;
@@ -366,6 +398,45 @@ static int wifi(int argc, char** argv)
             wifi_set_password(argv[2]);
         else
             printf("Wifi Password : %s\n", wifi_get_password());
+    } else if(strcasecmp(argv[1], "bssid") == 0) {
+        if(argc >= 3) {
+            uint8_t i = 0;
+            uint8_t mac[6] = {0};
+            char *s = strdup(argv[2]);
+            char *t = strtok(s, ":");
+            while(t != NULL && i < 6) {
+                mac[i++] = atohex(t);
+                t = strtok(NULL, ":");
+            }
+            wifi_set_bssid(mac);
+        } else {
+            uint8_t *mac = wifi_get_bssid();
+            printf("Wifi BSSID :  %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        }
+    } else if(strcasecmp(argv[1], "channel") == 0) {
+        if(argc >= 3) {
+            int v = atoi(argv[2]);
+            if(v >= 0 && v <= 13)
+                wifi_set_channel((uint8_t)(v & 0xff));
+            else
+                printf("Wifi Channel range from 0 to 13\n");
+        } else
+            printf("Wifi Channel : %u\n", wifi_get_ap_channel());
+    } else if(strcasecmp(argv[1], "ap_mac") == 0) {
+        if(argc >= 3) {
+            uint8_t i = 0;
+            uint8_t mac[6] = {0};
+            char *s = strdup(argv[2]);
+            char *t = strtok(s, ":");
+            while(t != NULL && i < 6) {
+                mac[i++] = atohex(t);
+                t = strtok(NULL, ":");
+            }
+            wifi_set_ap_mac(mac);
+        } else {
+            uint8_t *mac = wifi_get_ap_mac();
+            printf("Wifi AP MAC :  %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        }
     } else if(strcasecmp(argv[1], "ap_ssid") == 0) {
         if(argc >= 3)
             wifi_set_ap_ssid(argv[2]);
@@ -438,7 +509,7 @@ static void register_wifi()
 {
     const esp_console_cmd_t cmd = {
         .command = "wifi",
-        .help = "wifi [ connect | disconnect | ssid | password | staticip | gateway | save | reset ] <string>",
+        .help = "wifi [ connect | disconnect | ssid | password | bssid | channel | staticip | gateway | ap_mac | ap_ssid | ap_password | ap_channel | save | reset ] <string>",
         .hint = NULL,
         .func = &wifi,
         .argtable = NULL,
@@ -718,7 +789,7 @@ static void initialize_console()
     linenoiseHistorySetMaxLen(100);
 
     /* Set command maximum length */
-    linenoiseSetMaxLineLen(console_config.max_cmdline_length);
+    //linenoiseSetMaxLineLen(console_config.max_cmdline_length);
 
     /* Don't return empty lines */
     linenoiseAllowEmpty(false);

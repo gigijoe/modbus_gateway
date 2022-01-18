@@ -119,14 +119,6 @@ menu "Network Connection Configuration"
                 default "12345678"
                 help
                     Wifi AP password
-
-            config EXAMPLE_WIFI_AP_CHANNEL
-                int "WiFi AP channel"
-                range 0 13
-
-                default 0
-                help
-                    The channel of wifi AP.
         endif
     endif
 
