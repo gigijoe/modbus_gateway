@@ -10,7 +10,8 @@ extern "C" {
 
 #include "sdkconfig.h"
 
-typedef enum { 
+typedef enum {
+	NETWORK_TYPE_NONE,
 	NETWORK_TYPE_WIFI, 
 #if CONFIG_EXAMPLE_CONNECT_ETHERNET
 	NETWORK_TYPE_ETH 
@@ -18,9 +19,10 @@ typedef enum {
 } network_type_e;
 
 void network_initialize(network_type_e type);
+void network_deinitialize();
 network_type_e get_network_type();
-esp_err_t network_connect(void);
-esp_err_t network_disconnect(void);
+esp_err_t network_start(void);
+esp_err_t network_stop(void);
 
 esp_ip4_addr_t network_get_ip();
 esp_ip4_addr_t network_get_gateway();
@@ -85,6 +87,8 @@ void wifi_set_static_netmask(esp_ip4_addr_t *ip4);
 esp_ip4_addr_t wifi_get_static_netmask();
 
 typedef enum {
+	WIFI_STOPPED,
+	WIFI_STARTED,
 	WIFI_DISCONNECTED,
 	WIFI_CONNECTED,
 	WIFI_CONNECTING,
@@ -105,6 +109,8 @@ void eth_set_static_gateway(esp_ip4_addr_t *ip4);
 esp_ip4_addr_t eth_get_static_gateway();
 
 typedef enum {
+	ETH_STOPPED,
+	ETH_STARTED,
 	ETH_DISCONNECTED,
 	ETH_CONNECTED,
 	ETH_CONNECTING,

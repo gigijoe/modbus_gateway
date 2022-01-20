@@ -51,6 +51,11 @@
 #include "modbus_tcp2serial.h"
 #include "modbus_data.h"
 
+#include "esp_bt.h"
+#include "esp_blufi_api.h"
+#include "blufi_example.h"
+#include "esp_blufi.h"
+
 #include <lwip/dns.h>
 
 #include <lwip/err.h>
@@ -196,8 +201,31 @@ static void stop_mdns_service(void)
 
 #endif // CONFIG_MB_MDNS_IP_RESOLVER
 
+static void initialize_gpio12()
+{
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = static_cast<gpio_int_type_t>(GPIO_PIN_INTR_DISABLE);
+    //set as output mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO18/19
+    io_conf.pin_bit_mask = GPIO_SEL_12;
+    //disable pull-down mode
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    //disable pull-up mode
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+
+    gpio_set_direction(GPIO_NUM_12, GPIO_MODE_INPUT);
+}
+
+extern esp_blufi_callbacks_t example_callbacks;
+
 static esp_err_t initialize_system(void)
 {
+    initialize_gpio12();
+
     esp_err_t result = nvs_flash_init();
     if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -249,7 +277,39 @@ static esp_err_t initialize_system(void)
     // This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
     // Read "Establishing Wi-Fi or Ethernet Connection" section in
     // examples/protocols/README.md for more information about this function.
-    result = network_connect();
+    result = network_start();
+
+ESP_LOGI(TAG, "Button level is %d", gpio_get_level(GPIO_NUM_12));
+
+    if(gpio_get_level(GPIO_NUM_12) != 0) /* Button released ... */
+        return ESP_OK;
+
+/****************************************************************************
+* This is a demo for bluetooth config wifi connection to ap. You can config ESP32 to connect a softap
+* or config ESP32 as a softap to be connected by other device. APP can be downloaded from github
+* android source code: https://github.com/EspressifApp/EspBlufi
+* iOS source code: https://github.com/EspressifApp/EspBlufiForiOS
+****************************************************************************/
+
+    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    result = esp_bt_controller_init(&bt_cfg);
+    if(result != ESP_OK) {
+        BLUFI_ERROR("%s initialize bt controller failed: %s\n", __func__, esp_err_to_name(result));
+    }
+
+    result = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    if(result == ESP_OK) {
+        result = esp_blufi_host_and_cb_init(&example_callbacks);
+        if(result == ESP_OK) {
+            BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
+        } else {
+            BLUFI_ERROR("%s initialise failed: %s\n", __func__, esp_err_to_name(result));
+        }
+    } else {    
+        BLUFI_ERROR("%s enable bt controller failed: %s\n", __func__, esp_err_to_name(result));
+    }
 
     return ESP_OK;
 }
@@ -258,11 +318,12 @@ static esp_err_t deinitialize_system(void)
 {
     esp_err_t err = ESP_OK;
 
-    err = network_disconnect();
+    err = network_stop();
     ESP_RETURN_ON_FALSE((err == ESP_OK), ESP_ERR_INVALID_STATE,
                                    TAG,
                                    "network_disconnect fail, returns(0x%x).",
                                    (uint32_t)err);
+    network_deinitialize();
     err = esp_event_loop_delete_default();
     ESP_RETURN_ON_FALSE((err == ESP_OK), ESP_ERR_INVALID_STATE,
                                        TAG,
@@ -347,6 +408,10 @@ static int wifi(int argc, char** argv)
         printf("Wifi STA MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         printf("Status : ");
         switch(wifi_get_status()) {
+            case WIFI_STOPPED: printf("Stopped ...\n");
+                break;
+            case WIFI_STARTED: printf("Started ...\n");
+                break;
             case WIFI_DISCONNECTED: printf("Disconnected ...\n");
                 break;
             case WIFI_CONNECTING: printf("Connecting ...\n");
@@ -456,10 +521,10 @@ static int wifi(int argc, char** argv)
                 printf("Wifi AP Channel range from 0 to 13\n");
         } else
             printf("Wifi AP Channel : %u\n", wifi_get_ap_channel());
-    } else if(strcasecmp(argv[1], "connect") == 0) {
-        network_connect();
-    } else if(strcasecmp(argv[1], "disconnect") == 0) {
-        network_disconnect();
+    } else if(strcasecmp(argv[1], "start") == 0) {
+        network_start();
+    } else if(strcasecmp(argv[1], "stop") == 0) {
+        network_stop();
     } else if(strcasecmp(argv[1], "staticip") == 0) {
         if(argc >= 3) {            
             esp_err_t r = esp_netif_str_to_ip4(argv[2], &ip4_addr);
@@ -509,7 +574,7 @@ static void register_wifi()
 {
     const esp_console_cmd_t cmd = {
         .command = "wifi",
-        .help = "wifi [ connect | disconnect | ssid | password | bssid | channel | staticip | gateway | ap_mac | ap_ssid | ap_password | ap_channel | save | reset ] <string>",
+        .help = "wifi [ start | stop | ssid | password | bssid | channel | staticip | gateway | ap_mac | ap_ssid | ap_password | ap_channel | save | reset ] <string>",
         .hint = NULL,
         .func = &wifi,
         .argtable = NULL,
@@ -529,11 +594,15 @@ static int eth(int argc, char** argv)
         printf("Ethernet MAC - %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);        
         printf("Status : ");
         switch(eth_get_status()) {
-            case WIFI_DISCONNECTED: printf("Disconnected ...\n");
+            case ETH_STOPPED: printf("Stopped ...\n");
                 break;
-            case WIFI_CONNECTING: printf("Connecting ...\n");
+            case ETH_STARTED: printf("Started ...\n");
                 break;
-            case WIFI_CONNECTED: printf("Connected ...\n");
+            case ETH_DISCONNECTED: printf("Disconnected ...\n");
+                break;
+            case ETH_CONNECTING: printf("Connecting ...\n");
+                break;
+            case ETH_CONNECTED: printf("Connected ...\n");
                 ip4_addr = eth_get_static_ip();
                 if(ip4_addr.addr == 0) { /* 0.0.0.0 */
                     esp_netif_t *netif = get_network_netif_from_desc("eth");
@@ -547,9 +616,9 @@ static int eth(int argc, char** argv)
                     printf("Gateway : %s\n", esp_ip4addr_ntoa(&ip4_addr, buf, 16));
                 }
                 break;
-            case WIFI_CONNECT_FAIL: printf("Connect fail ...\n");
+            case ETH_CONNECT_FAIL: printf("Connect fail ...\n");
                 break;
-            case WIFI_INTERNAL_ERROR: printf("Internal error ...\n");
+            case ETH_INTERNAL_ERROR: printf("Internal error ...\n");
                  break;
         }
         return 0;
@@ -1395,7 +1464,7 @@ extern "C" void app_main(void)
     xTaskCreatePinnedToCore(&consoleTask, "consoleTask", 3072, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(&telnetdTask, "telnetdTask", 4096, NULL, 2, NULL, 1);
 
-    xTaskCreatePinnedToCore(&appTask, "appTask", 4096, NULL, 3, NULL, 0);
+    //xTaskCreatePinnedToCore(&appTask, "appTask", 4096, NULL, 3, NULL, 0);
 
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
     start_webserver();
