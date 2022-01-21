@@ -203,6 +203,13 @@ CONFIG_BOOTLOADER_FLASH_XMC_SUPPORT=y
 # CONFIG_SECURE_FLASH_ENC_ENABLED is not set
 # end of Security features
 
+#
+# Example Board Configuration
+#
+# CONFIG_ESP_LYRAT_V4_3_BOARD is not set
+CONFIG_ESP_CUSTOM_BOARD=y
+# end of Example Board Configuration
+
 CONFIG_ESP_ROM_HAS_CRC_LE=y
 CONFIG_ESP_ROM_HAS_CRC_BE=y
 CONFIG_ESP_ROM_HAS_JPEG_DECODE=y

@@ -894,22 +894,8 @@ wifi_status_t wifi_get_status()
 *
 */
 
-static esp_netif_t *wifi_sta_config(wifi_config_t *wifi_config)
+static esp_err_t wifi_sta_config(wifi_config_t *sta_config)
 {
-#if 0
-    esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_STA();
-    // Prefix the interface description with the module TAG
-    // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
-    char *desc;
-    asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
-    esp_netif_config.if_desc = desc;
-    esp_netif_config.route_prio = 128;
-    s_netif_sta = esp_netif_create_wifi(WIFI_IF_STA, &esp_netif_config);
-    free(desc);
-    esp_wifi_set_default_wifi_sta_handlers();
-#else
-	s_netif_sta = esp_netif_create_default_wifi_sta();
-#endif
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, &on_wifi_start, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &on_wifi_connect, NULL, NULL));
@@ -951,45 +937,31 @@ static esp_netif_t *wifi_sta_config(wifi_config_t *wifi_config)
 	}
 
 	if(s_ssid[0] != '\0')
-		memcpy(wifi_config->sta.ssid, s_ssid, WIFI_SSID_MAX_LEN);
+		memcpy(sta_config->sta.ssid, s_ssid, WIFI_SSID_MAX_LEN);
 	if(s_pass[0] != '\0')
-		memcpy(wifi_config->sta.password, s_pass, WIFI_PASS_MAX_LEN);
+		memcpy(sta_config->sta.password, s_pass, WIFI_PASS_MAX_LEN);
 	//if(s_bssid[0] != 0 || s_bssid[1] != 0 || s_bssid[2] != 0 || s_bssid[3] != 0 || s_bssid[4] != 0 || s_bssid[5] != 0) {
 	if(is_null_mac(s_bssid) == false) {
 		ESP_LOGE(TAG, "Connect to BSSID: %02x:%02x:%02x:%02x:%02x:%02x", s_bssid[0], s_bssid[1], s_bssid[2], s_bssid[3], s_bssid[4], s_bssid[5]);
-		memcpy(wifi_config->sta.bssid, s_bssid, 6);
-		wifi_config->sta.bssid_set = 1;
+		memcpy(sta_config->sta.bssid, s_bssid, 6);
+		sta_config->sta.bssid_set = 1;
 	}
-	wifi_config->sta.channel = s_channel;
+	sta_config->sta.channel = s_channel;
 
     ESP_LOGI(TAG, "Connect to SSID : %s password : %s channel : %d",
-             wifi_config->sta.ssid, wifi_config->sta.password, wifi_config->sta.channel);
+             sta_config->sta.ssid, sta_config->sta.password, sta_config->sta.channel);
 
-	return s_netif_sta;
+	return ESP_OK;
 }
 
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
 
-static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
+static esp_err_t wifi_ap_config(wifi_config_t *ap_config)
 {
 	//if(s_ap_mac[0] != 0 || s_ap_mac[1] != 0 || s_ap_mac[2] != 0 || s_ap_mac[3] != 0 || s_ap_mac[4] != 0 || s_ap_mac[5] != 0)
 	if(is_null_mac(s_ap_mac) == false) {
 		esp_wifi_set_mac(WIFI_IF_AP, s_ap_mac);
 	}
-#if 0
-    esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_AP();
-    // Prefix the interface description with the module TAG
-    // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
-    char *desc;
-    asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
-    esp_netif_config.if_desc = desc;
-    //esp_netif_config.route_prio = 128;
-    s_netif_ap = esp_netif_create_wifi(WIFI_IF_AP, &esp_netif_config);
-    free(desc);
-    esp_wifi_set_default_wifi_ap_handlers();
-#else
-	s_netif_ap = esp_netif_create_default_wifi_ap();
-#endif
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, &on_wifi_ap, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &on_wifi_ap, NULL, NULL));
 
@@ -1033,10 +1005,12 @@ static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
     dnsserver.type = IPADDR_TYPE_V4;
     dhcps_dns_setserver(&dnsserver);
 
-    return s_netif_ap;
+    return ESP_OK;
 }
 
 #endif // CONFIG_EXAMPLE_ENABLE_WIFI_AP
+
+static wifi_config_t s_wifi_config = {0};
 
 static esp_netif_t *wifi_start(void)
 {
@@ -1044,7 +1018,21 @@ static esp_netif_t *wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-	wifi_config_t ap_config = {
+#if 0
+    esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_AP();
+    // Prefix the interface description with the module TAG
+    // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
+    char *desc;
+    asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
+    esp_netif_config.if_desc = desc;
+    //esp_netif_config.route_prio = 128;
+    s_netif_ap = esp_netif_create_wifi(WIFI_IF_AP, &esp_netif_config);
+    free(desc);
+    esp_wifi_set_default_wifi_ap_handlers();
+#else
+	s_netif_ap = esp_netif_create_default_wifi_ap();
+#endif
+	static wifi_config_t ap_config = {
         .ap = {
         	.ssid = CONFIG_EXAMPLE_WIFI_AP_SSID,
         	.ssid_len = strlen(CONFIG_EXAMPLE_WIFI_AP_SSID),
@@ -1056,12 +1044,27 @@ static esp_netif_t *wifi_start(void)
             .beacon_interval = 100,
         }
     };
-    wifi_ap_config(&ap_config);
+    ESP_ERROR_CHECK(wifi_ap_config(&ap_config));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+	memcpy(&s_wifi_config.ap, &ap_config.ap, sizeof(wifi_ap_config_t));
 #else
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 #endif
-    wifi_config_t sta_config = {
+#if 0
+    esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_STA();
+    // Prefix the interface description with the module TAG
+    // Warning: the interface desc is used in tests to capture actual connection details (IP, gw, mask)
+    char *desc;
+    asprintf(&desc, "%s: %s", TAG, esp_netif_config.if_desc);
+    esp_netif_config.if_desc = desc;
+    esp_netif_config.route_prio = 128;
+    s_netif_sta = esp_netif_create_wifi(WIFI_IF_STA, &esp_netif_config);
+    free(desc);
+    esp_wifi_set_default_wifi_sta_handlers();
+#else
+	s_netif_sta = esp_netif_create_default_wifi_sta();
+#endif
+    static wifi_config_t sta_config = {
         .sta = {
             .ssid = CONFIG_EXAMPLE_WIFI_SSID,
             .password = CONFIG_EXAMPLE_WIFI_PASSWORD,
@@ -1072,8 +1075,10 @@ static esp_netif_t *wifi_start(void)
         },
     };
 
-	wifi_sta_config(&sta_config);
+	ESP_ERROR_CHECK(wifi_sta_config(&sta_config));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
+	memcpy(&s_wifi_config.sta, &sta_config.sta, sizeof(wifi_sta_config_t));
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     if(s_enable_blufi == false) /* Button released ... Blufi disabled */
@@ -1547,16 +1552,18 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         /* there is no wifi callback when the device has already connected to this wifi
         so disconnect wifi before connection.
         */
-        if(s_wifi_status != WIFI_STOPPED)
-        	wifi_stop();
-        wifi_start();
-        //esp_wifi_disconnect();
-        //esp_wifi_connect();
+        //if(s_wifi_status != WIFI_STOPPED)
+        //	wifi_stop();
+        //wifi_start();
+        esp_wifi_disconnect();
+        wifi_sta_config(&s_wifi_config);
+    	esp_wifi_set_config(WIFI_IF_STA, &s_wifi_config);
+        esp_wifi_connect();
         break;
     case ESP_BLUFI_EVENT_REQ_DISCONNECT_FROM_AP:
         BLUFI_INFO("BLUFI requset wifi disconnect from AP\n");
-        //esp_wifi_disconnect();
-        wifi_stop();
+        esp_wifi_disconnect();
+        //wifi_stop();
         break;
     case ESP_BLUFI_EVENT_REPORT_ERROR:
         BLUFI_ERROR("BLUFI report error, error code %d\n", param->report_error.state);
@@ -1605,6 +1612,7 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         strncpy((char *)cache, (char *)param->sta_passwd.passwd, param->sta_passwd.passwd_len);
         cache[param->sta_passwd.passwd_len] = '\0';
         //esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+        wifi_set_password((const char *)cache);
         BLUFI_INFO("Recv STA PASSWORD %s\n", cache);
         break;
 	case ESP_BLUFI_EVENT_RECV_SOFTAP_SSID:
@@ -1612,12 +1620,14 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         cache[param->softap_ssid.ssid_len] = '\0';
         //ap_config.ap.ssid_len = param->softap_ssid.ssid_len;
         //esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+        wifi_set_ap_ssid((const char *)cache);
         BLUFI_INFO("Recv SOFTAP SSID %s, ssid len %d\n", cache, param->softap_ssid.ssid_len);
         break;
 	case ESP_BLUFI_EVENT_RECV_SOFTAP_PASSWD:
         strncpy((char *)cache, (char *)param->softap_passwd.passwd, param->softap_passwd.passwd_len);
         cache[param->softap_passwd.passwd_len] = '\0';
         //esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+        wifi_set_ap_password((const char *)cache);
         BLUFI_INFO("Recv SOFTAP PASSWORD %s len = %d\n", cache, param->softap_passwd.passwd_len);
         break;
 	case ESP_BLUFI_EVENT_RECV_SOFTAP_MAX_CONN_NUM:
