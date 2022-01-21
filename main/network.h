@@ -18,7 +18,7 @@ typedef enum {
 #endif
 } network_type_e;
 
-void network_initialize(network_type_e type);
+void network_initialize(network_type_e type, bool enable_blufi);
 void network_deinitialize();
 network_type_e get_network_type();
 esp_err_t network_start(void);

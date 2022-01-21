@@ -51,11 +51,6 @@
 #include "modbus_tcp2serial.h"
 #include "modbus_data.h"
 
-#include "esp_bt.h"
-#include "esp_blufi_api.h"
-#include "blufi_example.h"
-#include "esp_blufi.h"
-
 #include <lwip/dns.h>
 
 #include <lwip/err.h>
@@ -220,8 +215,6 @@ static void initialize_gpio12()
     gpio_set_direction(GPIO_NUM_12, GPIO_MODE_INPUT);
 }
 
-extern esp_blufi_callbacks_t example_callbacks;
-
 static esp_err_t initialize_system(void)
 {
     initialize_gpio12();
@@ -270,46 +263,16 @@ static esp_err_t initialize_system(void)
         start_mdns_service();
 #endif
     if(s_sys_cfg.enable_eth)
-        network_initialize(NETWORK_TYPE_ETH);
+        network_initialize(NETWORK_TYPE_ETH, false);
     else
-        network_initialize(NETWORK_TYPE_WIFI);
+        network_initialize(NETWORK_TYPE_WIFI, gpio_get_level(GPIO_NUM_12) == 0); /* if button released than enable blufi */
+
+ESP_LOGI(TAG, "Button level is %d", gpio_get_level(GPIO_NUM_12));
 
     // This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
     // Read "Establishing Wi-Fi or Ethernet Connection" section in
     // examples/protocols/README.md for more information about this function.
     result = network_start();
-
-ESP_LOGI(TAG, "Button level is %d", gpio_get_level(GPIO_NUM_12));
-
-    if(gpio_get_level(GPIO_NUM_12) != 0) /* Button released ... */
-        return ESP_OK;
-
-/****************************************************************************
-* This is a demo for bluetooth config wifi connection to ap. You can config ESP32 to connect a softap
-* or config ESP32 as a softap to be connected by other device. APP can be downloaded from github
-* android source code: https://github.com/EspressifApp/EspBlufi
-* iOS source code: https://github.com/EspressifApp/EspBlufiForiOS
-****************************************************************************/
-
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
-
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    result = esp_bt_controller_init(&bt_cfg);
-    if(result != ESP_OK) {
-        BLUFI_ERROR("%s initialize bt controller failed: %s\n", __func__, esp_err_to_name(result));
-    }
-
-    result = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-    if(result == ESP_OK) {
-        result = esp_blufi_host_and_cb_init(&example_callbacks);
-        if(result == ESP_OK) {
-            BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
-        } else {
-            BLUFI_ERROR("%s initialise failed: %s\n", __func__, esp_err_to_name(result));
-        }
-    } else {    
-        BLUFI_ERROR("%s enable bt controller failed: %s\n", __func__, esp_err_to_name(result));
-    }
 
     return ESP_OK;
 }

@@ -36,7 +36,8 @@ static network_type_e s_network_type = NETWORK_TYPE_NONE;
 static wifi_status_t s_wifi_status = WIFI_STOPPED;
 static eth_status_t s_eth_status = ETH_STOPPED;
 
-static bool ble_is_connected = false;
+static bool s_enable_blufi = false;
+static bool s_ble_is_connected = false;
 
 #ifdef CONFIG_EXAMPLE_CONNECT_IPV6
 #define MAX_IP6_ADDRS_PER_NETIF (5)
@@ -129,6 +130,8 @@ static bool is_our_netif(const char *prefix, esp_netif_t *netif)
     return strncmp(prefix, esp_netif_get_desc(netif), strlen(prefix) - 1) == 0;
 }
 */
+extern esp_blufi_callbacks_t example_callbacks;
+
 /* set up connection, Wi-Fi and/or Ethernet */
 static void _network_start(void)
 {
@@ -141,6 +144,35 @@ static void _network_start(void)
 	if(s_network_type == NETWORK_TYPE_ETH)
     	s_network_esp_netif = eth_start();
 #endif
+
+    if(s_enable_blufi) {
+/****************************************************************************
+* This is a demo for bluetooth config wifi connection to ap. You can config ESP32 to connect a softap
+* or config ESP32 as a softap to be connected by other device. APP can be downloaded from github
+* android source code: https://github.com/EspressifApp/EspBlufi
+* iOS source code: https://github.com/EspressifApp/EspBlufiForiOS
+****************************************************************************/
+
+	    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+	    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+	    esp_err_t ret = esp_bt_controller_init(&bt_cfg);
+	    if(ret != ESP_OK) {
+	        BLUFI_ERROR("%s initialize bt controller failed: %s\n", __func__, esp_err_to_name(ret));
+	    }
+
+	    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+	    if(ret == ESP_OK) {
+	        ret = esp_blufi_host_and_cb_init(&example_callbacks);
+	        if(ret == ESP_OK) {
+	            BLUFI_INFO("BLUFI VERSION %04x\n", esp_blufi_get_version());
+	        } else {
+	            BLUFI_ERROR("%s initialise failed: %s\n", __func__, esp_err_to_name(ret));
+	        }
+	    } else {    
+	        BLUFI_ERROR("%s enable bt controller failed: %s\n", __func__, esp_err_to_name(ret));
+	    }
+    }
 }
 
 /* tear down connection, release resources */
@@ -189,7 +221,7 @@ static void on_got_ip(void *arg, esp_event_base_t event_base,
 	info.sta_ssid = s_conn_ssid;
 	info.sta_ssid_len = s_conn_ssid_len;
 
-	if (ble_is_connected == true) {
+	if (s_ble_is_connected == true) {
 	    esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS, 0, &info);
 	} else {
 	    BLUFI_INFO("BLUFI BLE is not connected yet\n");
@@ -213,10 +245,12 @@ static void on_got_ipv6(void *arg, esp_event_base_t event_base,
                         int32_t event_id, void *event_data)
 {
     ip_event_got_ip6_t *event = (ip_event_got_ip6_t *)event_data;
+/*    
     if (!is_our_netif(TAG, event->esp_netif)) {
         ESP_LOGW(TAG, "Got IPv6 from another netif: ignored");
         return;
     }
+*/
     esp_ip6_addr_type_t ipv6_type = esp_netif_ip6_get_addr_type(&event->ip6_info.ip);
     ESP_LOGI(TAG, "Got IPv6 event: Interface \"%s\" address: " IPV6STR ", type: %s", esp_netif_get_desc(event->esp_netif),
              IPV62STR(event->ip6_info.ip), s_ipv6_addr_types[ipv6_type]);
@@ -231,9 +265,10 @@ static void on_got_ipv6(void *arg, esp_event_base_t event_base,
 
 #endif // CONFIG_EXAMPLE_CONNECT_IPV6
 
-void network_initialize(network_type_e type)
+void network_initialize(network_type_e type, bool enable_blufi)
 {
 	s_network_type = type;
+	s_enable_blufi = enable_blufi;
 }
 
 void network_deinitialize()
@@ -313,7 +348,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         esp_wifi_get_mode(&mode);
 
         /* TODO: get config or information of softap, then set to report extra_info */
-        if (ble_is_connected == true) {
+        if (s_ble_is_connected == true) {
             if (s_wifi_status == WIFI_CONNECTED) {
                 esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS, 0, NULL);
             } else {
@@ -350,7 +385,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             memcpy(blufi_ap_list[i].ssid, ap_list[i].ssid, sizeof(ap_list[i].ssid));
         }
 
-        if (ble_is_connected == true) {
+        if (s_ble_is_connected == true) {
             esp_blufi_send_wifi_list(apCount, blufi_ap_list);
         } else {
             BLUFI_INFO("BLUFI BLE is not connected yet\n");
@@ -927,7 +962,7 @@ static esp_netif_t *wifi_sta_config(wifi_config_t *wifi_config)
 	}
 	wifi_config->sta.channel = s_channel;
 
-    ESP_LOGI(TAG, "Connect to SSID:%s password:%s channel:%d",
+    ESP_LOGI(TAG, "Connect to SSID : %s password : %s channel : %d",
              wifi_config->sta.ssid, wifi_config->sta.password, wifi_config->sta.channel);
 
 	return s_netif_sta;
@@ -959,8 +994,13 @@ static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &on_wifi_ap, NULL, NULL));
 
 	esp_netif_ip_info_t ipInfo_ap;
-	IP4_ADDR(&ipInfo_ap.ip, 172,16,0,1);
-	IP4_ADDR(&ipInfo_ap.gw, 172,16,0,1);
+#if CONFIG_EXAMPLE_WIFI_AP_DAISY_CHAIN
+	IP4_ADDR(&ipInfo_ap.ip, 172,16,s_ap_mac[2],1);
+	IP4_ADDR(&ipInfo_ap.gw, 172,16,s_ap_mac[2],1);
+#else
+	IP4_ADDR(&ipInfo_ap.ip, 172,16,4,1);
+	IP4_ADDR(&ipInfo_ap.gw, 172,16,4,1);
+#endif
 	IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
 
 	esp_netif_dhcps_stop(s_netif_ap); // stop before setting ip WifiAP
@@ -978,7 +1018,7 @@ static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
 	if(s_ap_channel != 0)
 		ap_config->ap.channel = s_ap_channel;
 
-    ESP_LOGI(TAG, "wifi_init_softap SSID:%s password:%s channel:%d",
+    ESP_LOGI(TAG, "wifi_init_softap SSID : %s password : %s channel : %d",
              ap_config->ap.ssid, ap_config->ap.password, ap_config->ap.channel);
 
     // Enable DNS (offer) for dhcp server
@@ -1036,7 +1076,7 @@ static esp_netif_t *wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    if(gpio_get_level(GPIO_NUM_12) != 0) /* Button released ... Blufi disabled */
+    if(s_enable_blufi == false) /* Button released ... Blufi disabled */
     	ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     else /* Blufi enabled */
     	ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
@@ -1462,8 +1502,6 @@ esp_netif_t *get_network_netif_from_desc(const char *desc)
 *
 */
 
-#define WIFI_LIST_NUM   10
-
 static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *param);
 
 esp_blufi_callbacks_t example_callbacks = {
@@ -1490,13 +1528,13 @@ static void example_event_callback(esp_blufi_cb_event_t event, esp_blufi_cb_para
         break;
     case ESP_BLUFI_EVENT_BLE_CONNECT:
         BLUFI_INFO("BLUFI ble connect\n");
-        ble_is_connected = true;
+        s_ble_is_connected = true;
         esp_blufi_adv_stop();
         blufi_security_init();
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         BLUFI_INFO("BLUFI ble disconnect\n");
-        ble_is_connected = false;
+        s_ble_is_connected = false;
         blufi_security_deinit();
         esp_blufi_adv_start();
         break;
