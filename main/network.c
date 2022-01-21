@@ -998,8 +998,8 @@ static esp_netif_t *wifi_ap_config(wifi_config_t *ap_config)
 	IP4_ADDR(&ipInfo_ap.ip, 172,16,s_ap_mac[2],1);
 	IP4_ADDR(&ipInfo_ap.gw, 172,16,s_ap_mac[2],1);
 #else
-	IP4_ADDR(&ipInfo_ap.ip, 172,16,4,1);
-	IP4_ADDR(&ipInfo_ap.gw, 172,16,4,1);
+	IP4_ADDR(&ipInfo_ap.ip, 172,16,0,1);
+	IP4_ADDR(&ipInfo_ap.gw, 172,16,0,1);
 #endif
 	IP4_ADDR(&ipInfo_ap.netmask, 255,255,255,0);
 
