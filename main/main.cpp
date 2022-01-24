@@ -527,6 +527,9 @@ static int wifi(int argc, char** argv)
     } else if(strcasecmp(argv[1], "reset") == 0) {
         wifi_factory_reset();
         printf("Reset done ...\n");
+    } else if(strcasecmp(argv[1], "reconnect") == 0) {
+        wifi_reconnect();
+        printf("Reconnect ...\n");
     } else
         printf("Unknown command !!!\n");
 
@@ -537,7 +540,7 @@ static void register_wifi()
 {
     const esp_console_cmd_t cmd = {
         .command = "wifi",
-        .help = "wifi [ start | stop | ssid | password | bssid | channel | staticip | gateway | ap_mac | ap_ssid | ap_password | ap_channel | save | reset ] <string>",
+        .help = "wifi [ start | stop | ssid | password | bssid | channel | staticip | gateway | ap_mac | ap_ssid | ap_password | ap_channel | save | reset | reconnect ] <string>",
         .hint = NULL,
         .func = &wifi,
         .argtable = NULL,
