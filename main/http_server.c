@@ -151,7 +151,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
             ESP_LOGI(TAG, "Found URL query => %s", buf);
             char param1[64];
             char param2[64];
-            char param3[64];
+            //char param3[64];
             /* Get value of expected key from query string */
             if (httpd_query_key_value(buf, "ap_ssid", param1, sizeof(param1)) == ESP_OK) {
                 ESP_LOGI(TAG, "Found URL query parameter => ap_ssid=%s", param1);

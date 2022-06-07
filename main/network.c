@@ -11,6 +11,7 @@
 #endif // CONFIG_EXAMPLE_CONNECT_ETHERNET
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_mac.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +30,11 @@
 #include "esp_blufi_api.h"
 #include "blufi_example.h"
 #include "esp_blufi.h"
+#endif
+
+#if CONFIG_WPA_11KV_SUPPORT
+#include "esp_wnm.h"
+#include "esp_rrm.h"
 #endif
 
 #include "network.h"
@@ -336,11 +342,11 @@ static void on_wifi_ap(void *arg, esp_event_base_t event_base,
 	}
 }
 
-#if CONFIG_EXAMPLE_ENABLE_BLUFI
-
 /*
 *
 */
+
+#if CONFIG_EXAMPLE_ENABLE_BLUFI
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 								int32_t event_id, void* event_data)
@@ -433,29 +439,6 @@ static void on_wifi_start(void *arg, esp_event_base_t event_base,
 		default:	s_wifi_status = WIFI_CONNECT_FAIL;
 			break;
 	}
-	//ESP_ERROR_CHECK(err);
-}
-
-static void on_wifi_disconnect(void *arg, esp_event_base_t event_base,
-							   int32_t event_id, void *event_data)
-{
-	ESP_LOGI(TAG, "Wi-Fi disconnected, trying to reconnect...");
-
-	s_ip_addr.addr = 0;
-	s_wifi_status = WIFI_DISCONNECTED;
-
-	led_off(&s_led25);
-
-	esp_err_t err = esp_wifi_connect();
-	switch(err) {
-		case ESP_OK: s_wifi_status = WIFI_CONNECTING;
-			break;
-		case ESP_ERR_WIFI_CONN: s_wifi_status = WIFI_INTERNAL_ERROR;
-			break;
-		default:	s_wifi_status = WIFI_CONNECT_FAIL;
-			break;
-	}
-	//ESP_ERROR_CHECK(err);
 }
 
 static void on_wifi_connect(void *esp_netif, esp_event_base_t event_base,
@@ -473,6 +456,248 @@ static void on_wifi_connect(void *esp_netif, esp_event_base_t event_base,
 	memcpy(s_conn_ssid, event->ssid, event->ssid_len);
 	s_conn_ssid_len = event->ssid_len;
 }
+
+static void on_wifi_disconnect(void *arg, esp_event_base_t event_base,
+							   int32_t event_id, void *event_data)
+{
+#if CONFIG_WPA_11KV_SUPPORT
+	wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
+	if(disconn->reason == WIFI_REASON_ROAMING) {
+		ESP_LOGI(TAG, "Wi-Fi roaming ...");
+		return;
+	}
+#endif
+
+	ESP_LOGI(TAG, "Wi-Fi disconnected, trying to reconnect...");
+
+	s_ip_addr.addr = 0;
+	s_wifi_status = WIFI_DISCONNECTED;
+
+	led_off(&s_led25);
+
+	esp_err_t err = esp_wifi_connect();
+	switch(err) {
+		case ESP_OK: s_wifi_status = WIFI_CONNECTING;
+			break;
+		case ESP_ERR_WIFI_CONN: s_wifi_status = WIFI_INTERNAL_ERROR;
+			break;
+		default: s_wifi_status = WIFI_CONNECT_FAIL;
+			break;
+	}
+}
+
+#if CONFIG_WPA_11KV_SUPPORT
+
+static int rrm_ctx = 0;
+
+#ifndef WLAN_EID_MEASURE_REPORT
+#define WLAN_EID_MEASURE_REPORT 39
+#endif
+#ifndef MEASURE_TYPE_LCI
+#define MEASURE_TYPE_LCI 9
+#endif
+#ifndef MEASURE_TYPE_LOCATION_CIVIC
+#define MEASURE_TYPE_LOCATION_CIVIC 11
+#endif
+#ifndef WLAN_EID_NEIGHBOR_REPORT
+#define WLAN_EID_NEIGHBOR_REPORT 52
+#endif
+#ifndef ETH_ALEN
+#define ETH_ALEN 6
+#endif
+
+#define MAX_NEIGHBOR_LEN 512
+static inline uint32_t WPA_GET_LE32(const uint8_t *a)
+{
+  return ((uint32_t) a[3] << 24) | (a[2] << 16) | (a[1] << 8) | a[0];
+}
+
+
+static char * get_btm_neighbor_list(uint8_t *report, size_t report_len)
+{
+  size_t len = 0;
+  const uint8_t *data;
+  int ret = 0;
+
+  /*
+   * Neighbor Report element (IEEE P802.11-REVmc/D5.0)
+   * BSSID[6]
+   * BSSID Information[4]
+   * Operating Class[1]
+   * Channel Number[1]
+   * PHY Type[1]
+   * Optional Subelements[variable]
+   */
+#define NR_IE_MIN_LEN (ETH_ALEN + 4 + 1 + 1 + 1)
+
+  if (!report || report_len == 0) {
+	ESP_LOGI(TAG, "RRM neighbor report is not valid");
+	return NULL;
+  }
+
+  char *buf = (char *)calloc(1, MAX_NEIGHBOR_LEN);
+  data = report;
+
+  while (report_len >= 2 + NR_IE_MIN_LEN) {
+	const uint8_t *nr;
+	char lci[256 * 2 + 1];
+	char civic[256 * 2 + 1];
+	uint8_t nr_len = data[1];
+	const uint8_t *pos = data, *end;
+
+	if (pos[0] != WLAN_EID_NEIGHBOR_REPORT ||
+		nr_len < NR_IE_MIN_LEN) {
+	  ESP_LOGI(TAG, "CTRL: Invalid Neighbor Report element: id=%u len=%u",
+		  data[0], nr_len);
+	  ret = -1;
+	  goto cleanup;
+	}
+
+	if (2U + nr_len > report_len) {
+	  ESP_LOGI(TAG, "CTRL: Invalid Neighbor Report element: id=%u len=%zu nr_len=%u",
+		  data[0], report_len, nr_len);
+	  ret = -1;
+	  goto cleanup;
+	}
+	pos += 2;
+	end = pos + nr_len;
+
+	nr = pos;
+	pos += NR_IE_MIN_LEN;
+
+	lci[0] = '\0';
+	civic[0] = '\0';
+	while (end - pos > 2) {
+	  uint8_t s_id, s_len;
+
+	  s_id = *pos++;
+	  s_len = *pos++;
+	  if (s_len > end - pos) {
+		ret = -1;
+		goto cleanup;
+	  }
+	  if (s_id == WLAN_EID_MEASURE_REPORT && s_len > 3) {
+		/* Measurement Token[1] */
+		/* Measurement Report Mode[1] */
+		/* Measurement Type[1] */
+		/* Measurement Report[variable] */
+		switch (pos[2]) {
+		  case MEASURE_TYPE_LCI:
+			if (lci[0])
+			  break;
+			memcpy(lci, pos, s_len);
+			break;
+		  case MEASURE_TYPE_LOCATION_CIVIC:
+			if (civic[0])
+			  break;
+			memcpy(civic, pos, s_len);
+			break;
+		}
+	  }
+
+	  pos += s_len;
+	}
+
+	ESP_LOGI(TAG, "RMM neigbor report bssid=" MACSTR
+		" info=0x%x op_class=%u chan=%u phy_type=%u%s%s%s%s",
+		MAC2STR(nr), WPA_GET_LE32(nr + ETH_ALEN),
+		nr[ETH_ALEN + 4], nr[ETH_ALEN + 5],
+		nr[ETH_ALEN + 6],
+		lci[0] ? " lci=" : "", lci,
+		civic[0] ? " civic=" : "", civic);
+
+	/* neighbor start */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, " neighbor=");
+	/* bssid */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, MACSTR, MAC2STR(nr));
+	/* , */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, ",");
+	/* bssid info */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, "0x%04x", WPA_GET_LE32(nr + ETH_ALEN));
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, ",");
+	/* operating class */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, "%u", nr[ETH_ALEN + 4]);
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, ",");
+	/* channel number */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, "%u", nr[ETH_ALEN + 5]);
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, ",");
+	/* phy type */
+	len += snprintf(buf + len, MAX_NEIGHBOR_LEN - len, "%u", nr[ETH_ALEN + 6]);
+	/* optional elements, skip */
+
+	data = end;
+	report_len -= 2 + nr_len;
+  }
+
+cleanup:
+  if (ret < 0) {
+	free(buf);
+	buf = NULL;
+  }
+  return buf;
+}
+
+void neighbor_report_recv_cb(void *ctx, const uint8_t *report, size_t report_len)
+{
+	int *val = ctx;
+	uint8_t *pos = (uint8_t *)report;
+	int cand_list = 0;
+
+	if (!report) {
+		ESP_LOGE(TAG, "report is null");
+		return;
+	}
+	if (*val != rrm_ctx) {
+		ESP_LOGE(TAG, "rrm_ctx value didn't match, not initiated by us");
+		return;
+	}
+	/* dump report info */
+	ESP_LOGI(TAG, "rrm: neighbor report len=%d", report_len);
+	ESP_LOG_BUFFER_HEXDUMP(TAG, pos, report_len, ESP_LOG_INFO);
+
+	/* create neighbor list */
+	char *neighbor_list = get_btm_neighbor_list(pos + 1, report_len - 1);
+
+	/* In case neighbor list is not present issue a scan and get the list from that */
+	if (!neighbor_list) {
+		/* issue scan */
+		wifi_scan_config_t params;
+		memset(&params, 0, sizeof(wifi_scan_config_t));
+		if (esp_wifi_scan_start(&params, true) < 0) {
+			goto cleanup;
+		}
+		/* cleanup from net802.11 */
+		uint16_t number = 1;
+		wifi_ap_record_t ap_records;
+		esp_wifi_scan_get_ap_records(&number, &ap_records);
+		cand_list = 1;
+	}
+	/* send AP btm query, this will cause STA to roam as well */
+	esp_wnm_send_bss_transition_mgmt_query(REASON_FRAME_LOSS, neighbor_list, cand_list);
+
+cleanup:
+	if (neighbor_list)
+		free(neighbor_list);
+}
+
+static int8_t wifi_rssi_threshold = -80;
+
+static void on_wifi_rssi_low(void *arg, esp_event_base_t event_base,
+							   int32_t event_id, void *event_data)
+{
+	wifi_event_bss_rssi_low_t *event = (wifi_event_bss_rssi_low_t *)event_data;
+	ESP_LOGI(TAG, "Wi-Fi BSS rssi low : %d", event->rssi);
+	rrm_ctx++;
+	if(esp_rrm_send_neighbor_rep_request(neighbor_report_recv_cb, &rrm_ctx) < 0) {
+		/* failed to send neighbor report request */
+		ESP_LOGI(TAG, "failed to send neighbor report request");
+		if (esp_wnm_send_bss_transition_mgmt_query(REASON_FRAME_LOSS, NULL, 0) < 0) {
+		ESP_LOGI(TAG, "failed to send btm query");
+		}
+	}  
+}
+
+#endif
 
 /*
 *
@@ -734,9 +959,9 @@ static esp_err_t wifi_sta_config(wifi_config_t *sta_config);
 
 void wifi_reconnect()
 {
+	esp_wifi_disconnect();
 	wifi_sta_config(&s_wifi_config);
 	esp_wifi_set_config(WIFI_IF_STA, &s_wifi_config);
-	esp_wifi_disconnect();
 	esp_wifi_connect();
 }
 
@@ -925,6 +1150,9 @@ static esp_err_t wifi_sta_config(wifi_config_t *sta_config)
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, &on_wifi_start, NULL, NULL));
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &on_wifi_connect, NULL, NULL));
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_disconnect, NULL, NULL));
+#if CONFIG_WPA_11KV_SUPPORT
+	ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_BSS_RSSI_LOW, &on_wifi_rssi_low, NULL, NULL));
+#endif
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL, NULL));
 #ifdef CONFIG_EXAMPLE_CONNECT_IPV6
 	ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_GOT_IP6, &on_got_ipv6, NULL, NULL));
@@ -1017,19 +1245,36 @@ static esp_err_t wifi_ap_config(wifi_config_t *ap_config)
 
 	ESP_LOGI(TAG, "wifi_init_softap SSID : %s password : %s channel : %d",
 			 ap_config->ap.ssid, ap_config->ap.password, ap_config->ap.channel);
-
-	// Enable DNS (offer) for dhcp server
-	dhcps_offer_t dhcps_dns_value = OFFER_DNS;
-	dhcps_set_option_info(6, &dhcps_dns_value, sizeof(dhcps_dns_value));
+#if 0
+    // Enable DNS (offer) for dhcp server
+    dhcps_offer_t dhcps_dns_value = OFFER_DNS;
+    dhcps_set_option_info(6, &dhcps_dns_value, sizeof(dhcps_dns_value));
 
 #define MY_DNS_IP_ADDR 0x08080808 // 8.8.8.8
 
-	ip_addr_t dnsserver;
-	// Set custom dns server address for dhcp server
-	dnsserver.u_addr.ip4.addr = htonl(MY_DNS_IP_ADDR);
-	dnsserver.type = IPADDR_TYPE_V4;
-	dhcps_dns_setserver(&dnsserver);
+    ip_addr_t dnsserver;
+    // Set custom dns server address for dhcp server
+    dnsserver.u_addr.ip4.addr = htonl(MY_DNS_IP_ADDR);
+    dnsserver.type = IPADDR_TYPE_V4;
+    dhcps_dns_setserver(&dnsserver);
+#else
+	static dhcps_t *s_dhcps = 0;
 
+    if(s_dhcps == 0)
+    	s_dhcps = dhcps_new();
+
+    // Enable DNS (offer) for dhcp server
+    dhcps_offer_t dhcps_dns_value = OFFER_DNS;
+    //dhcps_set_option_info(s_dhcps, 6, &dhcps_dns_value, sizeof(dhcps_dns_value));
+
+#define MY_DNS_IP_ADDR 0x08080808 // 8.8.8.8
+
+    ip_addr_t dnsserver;
+    // Set custom dns server address for dhcp server
+    dnsserver.u_addr.ip4.addr = htonl(MY_DNS_IP_ADDR);
+    dnsserver.type = IPADDR_TYPE_V4;
+    //dhcps_dns_setserver(s_dhcps, &dnsserver);
+#endif
 	return ESP_OK;
 }
 
@@ -1095,6 +1340,15 @@ static esp_netif_t *wifi_start(void)
 			.sort_method = EXAMPLE_WIFI_CONNECT_AP_SORT_METHOD,
 			.threshold.rssi = CONFIG_EXAMPLE_WIFI_SCAN_RSSI_THRESHOLD,
 			.threshold.authmode = EXAMPLE_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+#ifdef CONFIG_WPA_11KV_SUPPORT
+            .rm_enabled = 1,
+            .btm_enabled = 1,
+#endif
+#ifdef CONFIG_WPA_11R_SUPPORT         
+            .mbo_enabled = 1,
+            .pmf_cfg.capable = 1,
+            .ft_enabled = 1,
+#endif            
 		},
 	};
 	ESP_ERROR_CHECK(wifi_sta_config(&sta_config));
@@ -1128,11 +1382,15 @@ static esp_netif_t *wifi_start(void)
 	esp_wifi_get_max_tx_power(&tx_power);
 	ESP_LOGI(TAG, "maximum tx power is %.2f dBm", tx_power * 0.25); 
 
-#if defined(CONFIG_EXAMPLE_ENABLE_WIFI_AP) && defined(CONFIG_LWIP_IP_FORWARD)
+#if defined(CONFIG_EXAMPLE_ENABLE_WIFI_AP) && defined(CONFIG_LWIP_IPV4_NAPT)
 	esp_netif_ip_info_t ipInfo_ap;
 	esp_netif_set_ip_info(s_netif_ap, &ipInfo_ap);
 	ip_napt_enable(ipInfo_ap.ip.addr, 1);
 	ESP_LOGI(TAG, "NAT is enabled");
+#endif
+
+#ifdef CONFIG_WPA_11KV_SUPPORT
+	esp_wifi_set_rssi_threshold(wifi_rssi_threshold);
 #endif
 
 #ifdef CONFIG_EXAMPLE_ENABLE_WIFI_AP
@@ -1151,6 +1409,9 @@ static void wifi_stop(void)
 	ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_STA_START, &on_wifi_start));
 	ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &on_wifi_connect));
 	ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_disconnect));
+#if CONFIG_WPA_11KV_SUPPORT
+	ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_STA_BSS_RSSI_LOW, &on_wifi_rssi_low));
+#endif
 	ESP_ERROR_CHECK(esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip));
 #ifdef CONFIG_EXAMPLE_CONNECT_IPV6
 	ESP_ERROR_CHECK(esp_event_handler_unregister(IP_EVENT, IP_EVENT_GOT_IP6, &on_got_ipv6));

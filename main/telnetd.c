@@ -15,7 +15,8 @@
 #define TAG "telnetd"
 
 static StaticQueue_t txStaticQueue;
-EXT_RAM_ATTR uint8_t txQueueStorageArea[512];
+//EXT_RAM_ATTR uint8_t txQueueStorageArea[512];
+EXT_RAM_BSS_ATTR uint8_t txQueueStorageArea[512];
 static xQueueHandle tx_data_queue = NULL;
 
 static int telnet_writefn(void* cookie, const char* data, int size)
@@ -28,7 +29,8 @@ static int telnet_writefn(void* cookie, const char* data, int size)
 #ifdef REDIRECT_STDIN
 
 static StaticQueue_t rxStaticQueue;
-EXT_RAM_ATTR uint8_t rxQueueStorageArea[128];
+//EXT_RAM_ATTR uint8_t rxQueueStorageArea[128];
+EXT_RAM_BSS_ATTR uint8_t rxQueueStorageArea[128];
 static xQueueHandle rx_data_queue = NULL;
 
 static int telnet_readfn(void* cookie, char* data, int size)

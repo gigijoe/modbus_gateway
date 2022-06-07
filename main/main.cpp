@@ -13,7 +13,8 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_sntp.h"
-
+#include "esp_mac.h"
+#include "esp_chip_info.h"
 #include "nvs_flash.h"
 
 #include "mdns.h"
@@ -74,7 +75,9 @@ static nvs_handle my_nvs_handle;
 typedef struct {
     char hostname[HOSTNAME_MAX_LEN];
     char description[DESCRIPTION_MAX_LEN];
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
     bool enable_eth;
+#endif
     bool enable_ntp;
     bool enable_mdns;
     bool enable_telnetd;
@@ -90,7 +93,8 @@ static sys_cfg_t s_sys_cfg = {};
 
 /* The variable used to hold the queue's data structure. */
 static StaticQueue_t xStaticQueue;
-EXT_RAM_ATTR uint8_t ucQueueStorageArea[ SYSLOG_QUEUE_SIZE * SIZEOF_SYSLOG ];
+//EXT_RAM_ATTR uint8_t ucQueueStorageArea[ SYSLOG_QUEUE_SIZE * SIZEOF_SYSLOG ];
+EXT_RAM_BSS_ATTR uint8_t ucQueueStorageArea[ SYSLOG_QUEUE_SIZE * SIZEOF_SYSLOG ];
 
 static QueueHandle_t s_syslog_queue;
 
@@ -204,7 +208,7 @@ static void initialize_gpio12()
     //set as output mode
     io_conf.mode = GPIO_MODE_INPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = GPIO_SEL_12;
+    io_conf.pin_bit_mask = (BIT(12)); //GPIO_SEL_12;
     //disable pull-down mode
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     //disable pull-up mode
@@ -241,7 +245,9 @@ static esp_err_t initialize_system(void)
 
     snprintf(s_sys_cfg.hostname, HOSTNAME_MAX_LEN, "modbus_gateway");
     snprintf(s_sys_cfg.description, DESCRIPTION_MAX_LEN, "unknown");
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
     s_sys_cfg.enable_eth = false;
+#endif
     s_sys_cfg.enable_ntp = true;
     s_sys_cfg.enable_mdns = true;
     s_sys_cfg.enable_telnetd = false;
@@ -262,9 +268,11 @@ static esp_err_t initialize_system(void)
     if(s_sys_cfg.enable_mdns)
         start_mdns_service();
 #endif
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
     if(s_sys_cfg.enable_eth)
         network_initialize(NETWORK_TYPE_ETH, false);
     else
+#endif
         network_initialize(NETWORK_TYPE_WIFI, gpio_get_level(GPIO_NUM_12) == 0); /* if button released than enable blufi */
 
 ESP_LOGI(TAG, "Button level is %d", gpio_get_level(GPIO_NUM_12));
@@ -409,7 +417,7 @@ static int wifi(int argc, char** argv)
         printf("Wifi AP MAC :  %02x:%02x:%02x:%02x:%02x:%02x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
 
         esp_netif_t *netif = get_network_netif_from_desc("ap");
-        esp_netif_ip_info_t ip_info = {0};
+        esp_netif_ip_info_t ip_info;
         esp_netif_get_ip_info(netif, &ip_info);
         printf("IP : " IPSTR "\n", IP2STR(&ip_info.ip));
 #endif
@@ -652,7 +660,9 @@ static int system(int argc, char** argv)
         printf("SPIRAM left %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
         printf("Hostname : %s\n", s_sys_cfg.hostname);
         printf("Description : %s\n", s_sys_cfg.description);
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
         printf("Ethernet : %s\n", s_sys_cfg.enable_eth ? "enable" : "disable");
+#endif
         printf("NTP : %s\n", s_sys_cfg.enable_ntp ? "enable" : "disable");
         printf("mDNS : %s\n", s_sys_cfg.enable_mdns ? "enable" : "disable");
         printf("Telnetd : %s\n", s_sys_cfg.enable_telnetd ? "enable" : "disable");
@@ -672,6 +682,7 @@ static int system(int argc, char** argv)
             snprintf(s_sys_cfg.description, DESCRIPTION_MAX_LEN, "%s", argv[2]);
         else
             printf("Description : %s\n", s_sys_cfg.description);
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
     } else if(strcasecmp(argv[1], "eth") == 0) {
         if(argc >= 3) {
             if(strcmp(argv[2], "enable") == 0)
@@ -680,6 +691,7 @@ static int system(int argc, char** argv)
                 s_sys_cfg.enable_eth = false;
         } else
             printf("Ethernet : %s\n", s_sys_cfg.enable_eth ? "enable" : "disable");
+#endif
     } else if(strcasecmp(argv[1], "ntp") == 0) {
         if(argc >= 3) {
             if(strcmp(argv[2], "enable") == 0)
@@ -827,7 +839,7 @@ static void initialize_console()
     //linenoiseSetMaxLineLen(console_config.max_cmdline_length);
 
     /* Don't return empty lines */
-    linenoiseAllowEmpty(false);
+    linenoiseAllowEmpty(true);
 }
 
 void consoleTask(void *pvParameters){
@@ -1139,7 +1151,7 @@ static void dns_found_cb(const char *name, const ip_addr_t *ipaddr, void *callba
             ip4_addr4(&addr.u_addr.ip4),
             name);
 }
-
+/*
 static void dns_query()
 {
     struct addrinfo hints = {};
@@ -1157,7 +1169,7 @@ static void dns_query()
         ESP_LOGI(TAG, "DNS lookup. IP=%s", inet_ntoa(*addr));
     }    
 }
-
+*/
 static void initialize_sntp(void)
 {
     ESP_LOGI(TAG, "Initializing SNTP");
@@ -1232,7 +1244,7 @@ void sntpTask(void *pvParameters) {
 }
 
 typedef enum { SYSLOG_IN_ON = 1, SYSLOG_IN_OFF, SYSLOG_OUT_ON, SYSLOG_OUT_OFF, SYSLOG_ALARM, SYSLOG_SYSTEM } syslog_e;
-
+/*
 static const char *syslog2str(syslog_e event)
 {
     switch(event) {
@@ -1252,7 +1264,7 @@ static const char *syslog2str(syslog_e event)
             return "Unknown";
     }
 }
-
+*/
 int64_t xx_time_get_time() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -1401,7 +1413,11 @@ extern "C" void app_main(void)
 
     xTaskCreatePinnedToCore(ledTask, "ledTask", 2048, NULL, 3, NULL, 0);
 
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
     if(s_sys_cfg.enable_eth == false) {
+#else
+    {
+#endif
         led_sos_beep(&s_buzzer);
         led_slow_flash(&s_led27);
     }
@@ -1438,7 +1454,11 @@ extern "C" void app_main(void)
 
     while(1) {
 #if 1        
+#if CONFIG_EXAMPLE_CONNECT_ETHERNET
         if(s_sys_cfg.enable_eth == false) {
+#else
+        {
+#endif
             wifi_ap_record_t ap_info;
             esp_err_t err = esp_wifi_sta_get_ap_info(&ap_info);
             if(err == ESP_OK) {
